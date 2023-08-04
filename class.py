@@ -5,7 +5,7 @@ import icalendar
 import uuid
 import copy
 
-workbook = openpyxl.load_workbook('./test.xlsx')
+workbook = openpyxl.load_workbook('./class.xlsx')
 sheet = workbook.active
 
 events = [] 
@@ -58,8 +58,18 @@ for item in events:
     if _teacher:
         teacher = _teacher.group(1)
         local = _local.group(1)
-    if ';' in weeks_info:
-        for weekly_course in weeks_info.split(';'):
+    #print(time, day, mount, course_name, weeks_info, teacher, local)
+    if ';' in course_info:
+        for weekly_course in course_info.split(';'):
+          course_name = re.search(r'^.+?(?=\{)', weekly_course).group()  
+          weeks_info = re.search(r'\{(.+?)\}', weekly_course).group(1)
+          teacher, local = None, None
+          _teacher = re.search(r'\[教师:(.+?)\,', weekly_course)
+          _local = re.search(r'\,地点:(.+?)\]', weekly_course)
+          if _teacher:
+            teacher = _teacher.group(1)
+            local = _local.group(1)
+        #   print(weekly_course)
           if '、' in weekly_course and '-' in weekly_course:
             weeks = re.split('-', weekly_course)
             range_weeks = weeks[0] + '-' + weeks[1]
@@ -78,6 +88,7 @@ for item in events:
           elif '、' in weekly_course:
             for weekly_info in weekly_course.split('、'):
                 week, teacher = re.search(r'(\d+)周\[教师:(.+)\]', weekly_info).groups()
+                # print([time, day, mount, course_name, week, teacher, local])
                 result.append([time, day, mount, course_name, week, teacher, local])  
 
           else:
@@ -89,6 +100,7 @@ for item in events:
                 teacher = re.search(r'\[教师:(.+?),', weekly_course).group(1)
 
             for week in range(int(start_week), int(end_week)+1):
+                # print([time, day, mount, course_name, str(week), teacher, local])
                 result.append([time, day, mount, course_name, str(week), teacher, local])
 
     else:
@@ -122,7 +134,8 @@ for item in events:
 
           for week in range(int(start_week), int(end_week)+1):
               result.append([time, day, mount, course_name, str(week), teacher, local])
-
+# for item in result:
+#    print(item)
 
 def get_date(start_year, start_month, start_day, start_weekday, week_num, week_day):
     """
@@ -194,39 +207,43 @@ for event in result:
     evt.add('uid', uid)
     
     cal.add_component(evt)
-
-# print(cal.to_ical().decode('utf-8'))
+#print(cal.to_ical().decode('utf-8'))
 merged_events = {}
 merged_cal = icalendar.Calendar()
 merged_event_uids = set()
 
+last_event = {}
+
 for event in cal.subcomponents:
+    # print(event['DTSTART'].to_ical().decode('utf-8'), event['DTEND'].dt)
     evt = copy.deepcopy(event)   
     day = evt['DTSTART'].dt.date()
-            
+    
     if day not in merged_events:
-        merged_events[day] = evt
-    else:
-        existing_event = merged_events[day]
-        if (evt['DTSTART'].dt - existing_event['DTEND'].dt).total_seconds() < 21*60:
-            merged_events[day] = icalendar.Event()
-            merged_events[day].add('SUMMARY', existing_event['SUMMARY'])
-            merged_events[day].add('DESCRIPTION', existing_event['DESCRIPTION'])
-            merged_events[day].add('LOCATION', existing_event['LOCATION'])
-            merged_events[day].add('DTSTART', min(existing_event['DTSTART'].dt, evt['DTSTART'].dt))
-            merged_events[day].add('DTEND', max(existing_event['DTEND'].dt, evt['DTEND'].dt))
-            merged_events[day].add('UID', str(uuid.uuid4()))
-            merged_event_uids.add(evt['UID'])
-            merged_event_uids.add(existing_event['UID'])
-            
-for event in merged_events.values():
-    merged_cal.add_component(event)
+        merged_events[day] = {}
+    if evt['SUMMARY'] not in merged_events[day]:
+        merged_events[day][evt['SUMMARY']] = icalendar.Event()
         
-for event in cal.subcomponents:
-  if event['UID'] not in merged_event_uids:
-    merged_cal.add_component(event)
-# 保存文件
-with open('./calendar.ics', 'wb') as f:
-  f.write(merged_cal.to_ical())
+        merged_events[day][evt['SUMMARY']].add('SUMMARY', evt['SUMMARY'])
+        merged_events[day][evt['SUMMARY']].add('DESCRIPTION', evt['DESCRIPTION'])
+        merged_events[day][evt['SUMMARY']].add('LOCATION', evt['LOCATION'])
+        merged_events[day][evt['SUMMARY']].add('DTSTART',  evt['DTSTART'])
+        merged_events[day][evt['SUMMARY']].add('DTEND', evt['DTEND'])
+        merged_events[day][evt['SUMMARY']].add('UID', str(uuid.uuid4()))
+        merged_event_uids.add(evt['UID'])
+        # merged_event_uids.add(existing_event['UID'])
+    else:
+        existing_event = merged_events[day][evt['SUMMARY']]
+        if (evt['DTSTART'].dt - existing_event['DTEND'].dt).total_seconds() < 21*60:
+            # merged_events[day][evt['SUMMARY']]['DTSTART']=min(existing_event['DTSTART'], evt['DTSTART'])
+            # merged_events[day][evt['SUMMARY']]['DTEND']=max(existing_event['DTEND'], evt['DTEND'])
+            merged_events[day][evt['SUMMARY']]['DTEND']=evt['DTEND'] if evt['DTEND'].dt > existing_event['DTEND'].dt else existing_event['DTEND']
+            merged_events[day][evt['SUMMARY']]['DTSTART']=evt['DTSTART'] if evt['DTSTART'].dt < existing_event['DTSTART'].dt else existing_event['DTSTART']
+for day_events in merged_events.values():
+    for event in day_events.values():
+        merged_cal.add_component(event)
 
+with open('./calendar.ics', 'wb') as f:
+    f.write(merged_cal.to_ical())
+#print(merged_cal.to_ical().decode('utf-8'))
 print("日程表已保存到 calendar.ics")
